@@ -20,6 +20,14 @@ $features = @(
 
 Push-Location $repositoryRoot
 try {
+    $dependencyTree = cargo tree --locked --target $target --package easytier --no-default-features --features $features --prefix none --format '{p}' 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "EasyTier dependency tree failed with exit code $LASTEXITCODE"
+    }
+    if (($dependencyTree | Out-String) -match '(?m)^pnet(?:_datalink)? v') {
+        throw 'Collab Windows no-TUN dependency graph must not contain pnet or pnet_datalink'
+    }
+
     cargo build --locked --release --target $target --package easytier --bins --no-default-features --features $features
     if ($LASTEXITCODE -ne 0) {
         throw "EasyTier build failed with exit code $LASTEXITCODE"
