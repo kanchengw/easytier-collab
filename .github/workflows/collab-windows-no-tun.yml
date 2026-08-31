@@ -19,6 +19,11 @@ jobs:
       - name: Install pinned Rust toolchain
         shell: pwsh
         run: rustup toolchain install 1.95.0 --profile minimal --target x86_64-pc-windows-msvc
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "26.0"
+          repo-token: ${{ github.token }}
       - name: Build and verify no-TUN runtime
         shell: cmd
         run: |
