@@ -1,0 +1,32 @@
+name: Collab Windows no-TUN
+
+on:
+  push:
+    branches:
+      - codex/collab-no-npcap-v2.6.4
+    tags:
+      - v2.6.4-collab.*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        shell: pwsh
+        run: rustup toolchain install 1.95.0 --profile minimal --target x86_64-pc-windows-msvc
+      - name: Build and verify no-TUN runtime
+        shell: cmd
+        run: |
+          call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
+          pwsh -NoProfile -File collab\windows-no-tun\build.ps1
+          pwsh -NoProfile -File collab\windows-no-tun\verify.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: easytier-windows-x86_64-v2.6.4-collab.1
+          path: artifacts/easytier-windows-x86_64-v2.6.4-collab.1.zip
+          if-no-files-found: error

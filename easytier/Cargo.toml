@@ -149,7 +149,6 @@ bytecodec = "0.4.15"
 rand = "0.8.5"
 
 serde = { version = "1.0", features = ["derive"] }
-pnet = { version = "0.35.0", features = ["serde"] }
 serde_json = "1"
 
 clap = { version = "4.5.30", features = [
@@ -271,12 +270,16 @@ resolv-conf = "0.7.3"
 dbus = { version = "0.9.7", features = ["vendored"] }
 which = "7.0.3"
 
+[target.'cfg(not(windows))'.dependencies]
+pnet = { version = "0.35.0", features = ["serde"] }
+
 [target.'cfg(all(windows, any(target_arch = "x86_64", target_arch = "x86")))'.dependencies]
 windivert = { git = "https://github.com/EasyTier/windivert-rust.git", rev = "adcc56d1550f7b5377ec2b3429f413ee24a77375", features = [
     "static",
 ] }
 
 [target.'cfg(windows)'.dependencies]
+pnet = { version = "0.35.0", default-features = false, features = ["serde"] }
 windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",

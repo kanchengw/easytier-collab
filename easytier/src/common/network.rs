@@ -2,11 +2,12 @@ use std::{net::IpAddr, ops::Deref, sync::Arc};
 
 #[cfg(target_os = "windows")]
 use network_interface::{
-    Addr as SystemAddr, NetworkInterface as SystemNetworkInterface, NetworkInterfaceConfig,
+    NetworkInterface, NetworkInterfaceConfig,
 };
+#[cfg(not(target_os = "windows"))]
 use pnet::datalink::NetworkInterface;
 #[cfg(target_os = "windows")]
-use pnet::{ipnetwork::IpNetwork, util::MacAddr};
+use pnet::util::MacAddr;
 use tokio::{
     sync::{Mutex, RwLock},
     task::JoinSet,
@@ -17,6 +18,17 @@ use crate::proto::peer_rpc::GetIpListResponse;
 use super::{netns::NetNS, stun::StunInfoCollectorTrait};
 
 pub const CACHED_IP_LIST_TIMEOUT_SEC: u64 = 60;
+
+fn interface_ip_addrs(iface: &NetworkInterface) -> impl Iterator<Item = IpAddr> + '_ {
+    #[cfg(target_os = "windows")]
+    {
+        iface.addr.iter().map(|addr| addr.ip())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        iface.ips.iter().map(|network| network.ip())
+    }
+}
 
 struct InterfaceFilter {
     iface: NetworkInterface,
@@ -151,22 +163,23 @@ impl InterfaceFilter {
 #[cfg(target_os = "windows")]
 impl InterfaceFilter {
     async fn filter_iface(&self) -> bool {
+        let has_nonzero_mac = self
+            .iface
+            .mac_addr
+            .as_deref()
+            .and_then(|mac| mac.parse::<MacAddr>().ok())
+            .map(|mac| !mac.is_zero())
+            .unwrap_or(false);
         tracing::debug!(
-            "iface_name: {:?}, p2p: {:?}, is_up: {:?}, iface: {:?}",
+            "iface_name: {:?}, internal: {:?}, iface: {:?}",
             self.iface.name,
-            self.iface.is_point_to_point(),
-            self.iface.is_up(),
+            self.iface.internal,
             self.iface
         );
-        !self.iface.is_point_to_point()
-            && !self.iface.is_loopback()
-            && self
-                .iface
-                .ips
-                .iter()
-                .map(|ip| ip.ip())
+        !self.iface.internal
+            && interface_ip_addrs(&self.iface)
                 .any(|ip| !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast())
-            && self.iface.mac.map(|mac| !mac.is_zero()).unwrap_or(false)
+            && has_nonzero_mac
     }
 }
 
@@ -292,80 +305,11 @@ impl IPCollector {
 
     #[cfg(target_os = "windows")]
     fn collect_interfaces_windows() -> Vec<NetworkInterface> {
-        match SystemNetworkInterface::show() {
-            Ok(ifaces) => ifaces
-                .into_iter()
-                .map(Self::convert_windows_interface)
-                .collect(),
+        match NetworkInterface::show() {
+            Ok(ifaces) => ifaces,
             Err(e) => {
-                tracing::warn!(
-                    ?e,
-                    "failed to enumerate interfaces via network-interface, falling back to pnet"
-                );
-                match std::panic::catch_unwind(pnet::datalink::interfaces) {
-                    Ok(ifaces) => ifaces,
-                    Err(_) => {
-                        tracing::error!(
-                            "failed to enumerate interfaces via both network-interface and pnet"
-                        );
-                        Vec::new()
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    fn convert_windows_interface(iface: SystemNetworkInterface) -> NetworkInterface {
-        let mac = iface.mac_addr.as_deref().and_then(|mac| {
-            mac.parse::<MacAddr>()
-                .map_err(|e| {
-                    tracing::debug!(iface = %iface.name, mac, ?e, "failed to parse interface mac")
-                })
-                .ok()
-        });
-
-        let ips = iface
-            .addr
-            .into_iter()
-            .filter_map(Self::convert_windows_interface_addr)
-            .collect();
-
-        NetworkInterface {
-            name: iface.name,
-            description: String::new(),
-            index: iface.index,
-            mac,
-            ips,
-            // pnet does not populate Windows flags either, so keep the existing semantics.
-            flags: 0,
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    fn convert_windows_interface_addr(addr: SystemAddr) -> Option<IpNetwork> {
-        match addr {
-            SystemAddr::V4(addr) => {
-                let netmask = addr
-                    .netmask
-                    .map(IpAddr::V4)
-                    .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::new(255, 255, 255, 255)));
-                IpNetwork::with_netmask(IpAddr::V4(addr.ip), netmask)
-                    .map_err(|e| {
-                        tracing::debug!(ip = %addr.ip, ?addr.netmask, ?e, "failed to convert ipv4")
-                    })
-                    .ok()
-            }
-            SystemAddr::V6(addr) => {
-                let netmask = addr
-                    .netmask
-                    .map(IpAddr::V6)
-                    .unwrap_or(IpAddr::V6(std::net::Ipv6Addr::from(u128::MAX)));
-                IpNetwork::with_netmask(IpAddr::V6(addr.ip), netmask)
-                    .map_err(|e| {
-                        tracing::debug!(ip = %addr.ip, ?addr.netmask, ?e, "failed to convert ipv6")
-                    })
-                    .ok()
+                tracing::error!(?e, "failed to enumerate interfaces via network-interface");
+                Vec::new()
             }
         }
     }
@@ -377,8 +321,7 @@ impl IPCollector {
         let ifaces = Self::collect_interfaces(net_ns.clone(), true).await;
         let _g = net_ns.guard();
         for iface in ifaces {
-            for ip in iface.ips {
-                let ip: std::net::IpAddr = ip.ip();
+            for ip in interface_ip_addrs(&iface) {
                 if let std::net::IpAddr::V4(v4) = ip {
                     if ip.is_loopback() || ip.is_multicast() {
                         continue;
@@ -391,8 +334,7 @@ impl IPCollector {
         let ifaces = Self::collect_interfaces(net_ns.clone(), false).await;
         let _g = net_ns.guard();
         for iface in ifaces {
-            for ip in iface.ips {
-                let ip: std::net::IpAddr = ip.ip();
+            for ip in interface_ip_addrs(&iface) {
                 if let std::net::IpAddr::V6(v6) = ip {
                     if v6.is_multicast() || v6.is_loopback() || v6.is_unicast_link_local() {
                         continue;
