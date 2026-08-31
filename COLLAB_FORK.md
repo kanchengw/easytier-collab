@@ -8,7 +8,8 @@ The fork does not replace or modify EasyTier's networking protocol, peer
 discovery, NAT traversal, relay, encryption, or RPC implementation. Its source
 change removes the Windows runtime dependency on Npcap's `Packet.dll` by:
 
-- compiling pnet without its `std`/datalink feature on Windows;
+- replacing pnet's umbrella crate with a local re-export of its packet/base
+  crates on Windows, so `pnet_datalink` is not linked;
 - using the existing `network-interface` crate for Windows interface discovery;
 - omitting the TUN and FakeTCP features from the Collab build profile.
 

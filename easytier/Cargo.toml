@@ -276,7 +276,7 @@ windivert = { git = "https://github.com/EasyTier/windivert-rust.git", rev = "adc
 ] }
 
 [target.'cfg(windows)'.dependencies]
-pnet = { version = "0.35.0", default-features = false, features = ["serde"] }
+pnet = { package = "easytier-pnet-no-datalink", path = "../collab/pnet-no-datalink" }
 windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",

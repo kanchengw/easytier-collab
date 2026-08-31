@@ -24,6 +24,9 @@ jobs:
         with:
           version: "26.0"
           repo-token: ${{ github.token }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: collab-windows-no-tun
       - name: Build and verify no-TUN runtime
         shell: cmd
         run: |
