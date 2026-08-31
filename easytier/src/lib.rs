@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+#[cfg(windows)]
+extern crate pnet_collab as pnet;
+
 use std::io;
 
 use clap::Command;
